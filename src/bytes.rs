@@ -436,10 +436,9 @@ impl Utf8Bytes {
     /// assert_eq!(bytes.try_into_mut(), Ok(BytesMut::from(&b"hello"[..])));
     /// ```
     pub fn try_into_mut(self) -> Result<Utf8BytesMut, Utf8Bytes> {
-        if self.is_unique() {
-            Ok(self.into())
-        } else {
-            Err(self)
+        match self.inner.try_into_mut() {
+            Ok(it) => Ok(unsafe { Utf8BytesMut::from_bytes_mut_unchecked(it) }),
+            Err(it) => Err(unsafe { Self::from_bytes_unchecked(it) }),
         }
     }
 }
@@ -548,7 +547,7 @@ impl PartialOrd<Utf8Bytes> for String {
 }
 impl PartialOrd<Utf8Bytes> for Cow<'_, str> {
     fn partial_cmp(&self, other: &Utf8Bytes) -> Option<cmp::Ordering> {
-        (&**self).partial_cmp(other.as_str())
+        (**self).partial_cmp(other.as_str())
     }
 }
 
@@ -611,7 +610,7 @@ impl From<Utf8Bytes> for Utf8BytesMut {
     /// assert_eq!(BytesMut::from(bytes), BytesMut::from(&b"hello"[..]));
     /// ```
     fn from(bytes: Utf8Bytes) -> Self {
-        todo!()
+        unsafe { Self::from_bytes_mut_unchecked(bytes.inner.into()) }
     }
 }
 
