@@ -1,14 +1,7 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+extern crate alloc;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod bytes;
+mod bytes_mut;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use bytes::Utf8Bytes;
+pub use bytes_mut::Utf8BytesMut;
