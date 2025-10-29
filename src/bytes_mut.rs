@@ -1,3 +1,5 @@
+use crate::FromUtf8Error;
+
 use super::Utf8Bytes;
 
 use core::iter::FromIterator;
@@ -56,6 +58,12 @@ pub struct Utf8BytesMut {
 }
 
 impl Utf8BytesMut {
+    pub fn from_bytes_mut(bytes: bytes::BytesMut) -> Result<Self, FromUtf8Error<bytes::BytesMut>> {
+        match str::from_utf8(&bytes) {
+            Ok(_) => Ok(unsafe { Self::from_bytes_mut_unchecked(bytes) }),
+            Err(error) => Err(FromUtf8Error { bytes, error }),
+        }
+    }
     pub const unsafe fn from_bytes_mut_unchecked(inner: bytes::BytesMut) -> Self {
         Self { inner }
     }
@@ -692,6 +700,12 @@ impl From<Utf8BytesMut> for Utf8Bytes {
     }
 }
 
+impl From<Utf8BytesMut> for bytes::BytesMut {
+    fn from(src: Utf8BytesMut) -> bytes::BytesMut {
+        src.inner
+    }
+}
+
 impl<T: AsRef<str>> PartialEq<T> for Utf8BytesMut {
     fn eq(&self, other: &T) -> bool {
         self.as_str().eq(other.as_ref())
@@ -915,8 +929,20 @@ impl PartialEq<Utf8BytesMut> for bytes::Bytes {
     }
 }
 
+impl From<Utf8BytesMut> for Vec<u8> {
+    fn from(value: Utf8BytesMut) -> Self {
+        value.inner.into()
+    }
+}
+
 impl From<Utf8BytesMut> for String {
     fn from(bytes: Utf8BytesMut) -> Self {
         unsafe { Self::from_utf8_unchecked(Vec::from(bytes.inner)) }
+    }
+}
+
+impl From<String> for Utf8BytesMut {
+    fn from(value: String) -> Self {
+        unsafe { Self::from_bytes_mut_unchecked(value.into_bytes().into_iter().collect()) }
     }
 }

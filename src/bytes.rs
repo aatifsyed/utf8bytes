@@ -1,3 +1,5 @@
+use crate::FromUtf8Error;
+
 use super::Utf8BytesMut;
 
 use core::iter::FromIterator;
@@ -93,6 +95,12 @@ pub struct Utf8Bytes {
 }
 
 impl Utf8Bytes {
+    pub fn from_bytes(bytes: bytes::Bytes) -> Result<Self, FromUtf8Error<bytes::Bytes>> {
+        match str::from_utf8(&bytes) {
+            Ok(_) => Ok(unsafe { Self::from_bytes_unchecked(bytes) }),
+            Err(error) => Err(FromUtf8Error { bytes, error }),
+        }
+    }
     pub const unsafe fn from_bytes_unchecked(inner: bytes::Bytes) -> Self {
         Self { inner }
     }
@@ -573,21 +581,6 @@ impl From<Box<str>> for Utf8Bytes {
 }
 
 impl From<Utf8Bytes> for bytes::Bytes {
-    /// Convert self into `BytesMut`.
-    ///
-    /// If `bytes` is unique for the entire original buffer, this will return a
-    /// `BytesMut` with the contents of `bytes` without copying.
-    /// If `bytes` is not unique for the entire original buffer, this will make
-    /// a copy of `bytes` subset of the original buffer in a new `BytesMut`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bytes::{Bytes, BytesMut};
-    ///
-    /// let bytes = Bytes::from(b"hello".to_vec());
-    /// assert_eq!(BytesMut::from(bytes), BytesMut::from(&b"hello"[..]));
-    /// ```
     fn from(utf8: Utf8Bytes) -> Self {
         utf8.inner
     }
