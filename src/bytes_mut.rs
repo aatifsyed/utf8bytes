@@ -14,89 +14,88 @@ use alloc::{
     vec::Vec,
 };
 
-/// A unique reference to a contiguous slice of memory.
+/// A unique reference to a contiguous slice of UTF-8 memory.
 ///
-/// `BytesMut` represents a unique view into a potentially shared memory region.
-/// Given the uniqueness guarantee, owners of `BytesMut` handles are able to
-/// mutate the memory.
-///
-/// `BytesMut` can be thought of as containing a `buf: Arc<Vec<u8>>`, an offset
-/// into `buf`, a slice length, and a guarantee that no other `BytesMut` for the
-/// same `buf` overlaps with its slice. That guarantee means that a write lock
-/// is not required.
-///
-/// # Growth
-///
-/// `BytesMut`'s `BufMut` implementation will implicitly grow its buffer as
-/// necessary. However, explicitly reserving the required space up-front before
-/// a series of inserts will be more efficient.
-///
-/// # Examples
-///
-/// ```
-/// use bytes::{BytesMut, BufMut};
-///
-/// let mut buf = BytesMut::with_capacity(64);
-///
-/// buf.put_u8(b'h');
-/// buf.put_u8(b'e');
-/// buf.put(&b"llo"[..]);
-///
-/// assert_eq!(&buf[..], b"hello");
-///
-/// // Freeze the buffer so that it can be shared
-/// let a = buf.freeze();
-///
-/// // This does not allocate, instead `b` points to the same memory.
-/// let b = a.clone();
-///
-/// assert_eq!(&a[..], b"hello");
-/// assert_eq!(&b[..], b"hello");
-/// ```
+/// This is built on [`BytesMut`](bytes::BytesMut), see its documentation for more.
 pub struct Utf8BytesMut {
+    /// # Invariant
+    /// - contains UTF-8.
+    #[deprecated = "use the accessors to preserve the invariants"]
     inner: bytes::BytesMut,
 }
 
 impl Utf8BytesMut {
+    /// Wrap `bytes` if it is UTF-8.
+    ///
+    /// If it is not, you can perform a lossy conversion using [`FromUtf8Error::into_utf8_lossy`].
     pub fn from_bytes_mut(bytes: bytes::BytesMut) -> Result<Self, FromUtf8Error<bytes::BytesMut>> {
         match str::from_utf8(&bytes) {
             Ok(_) => Ok(unsafe { Self::from_bytes_mut_unchecked(bytes) }),
             Err(error) => Err(FromUtf8Error { bytes, error }),
         }
     }
-    pub const unsafe fn from_bytes_mut_unchecked(inner: bytes::BytesMut) -> Self {
-        Self { inner }
+    /// # Safety
+    /// `bytes` must only contain UTF-8.
+    pub const unsafe fn from_bytes_mut_unchecked(bytes: bytes::BytesMut) -> Self {
+        #[expect(deprecated)]
+        Self { inner: bytes }
     }
+    /// Get the contents of the buffer.
     pub fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(&self.inner) }
+        unsafe { str::from_utf8_unchecked(self.inner()) }
     }
+    /// Get an exclusive reference to the contents of the buffer.
     pub fn as_mut_str(&mut self) -> &mut str {
-        unsafe { str::from_utf8_unchecked_mut(&mut self.inner) }
+        // SAFETY:
+        // - We don't modify the buffer except as a str.
+        // - The inner buffer satisfies our invariant.
+        unsafe { str::from_utf8_unchecked_mut(self.inner_mut_unchecked()) }
     }
 }
 
 impl Utf8BytesMut {
-    /// Creates a new `BytesMut` with the specified capacity.
+    /// Return a shared reference to the inner object.
+    #[inline]
+    pub const fn inner(&self) -> &bytes::BytesMut {
+        #[expect(deprecated)]
+        &self.inner
+    }
+
+    /// Return an exclusive reference to the inner object.
     ///
-    /// The returned `BytesMut` will be able to hold at least `capacity` bytes
+    /// # Safety
+    /// - The returned bytes must be returned containing UTF-8
+    #[inline]
+    pub const unsafe fn inner_mut_unchecked(&mut self) -> &mut bytes::BytesMut {
+        #[expect(deprecated)]
+        &mut self.inner
+    }
+    #[inline]
+    pub fn into_inner(self) -> bytes::BytesMut {
+        #[expect(deprecated)]
+        self.inner
+    }
+}
+
+impl Utf8BytesMut {
+    /// Creates a new [`Utf8BytesMut`] with the specified capacity.
+    ///
+    /// The returned [`Utf8BytesMut`] will be able to hold at least `capacity` bytes
     /// without reallocating.
-    ///
-    /// It is important to note that this function does not specify the length
-    /// of the returned `BytesMut`, but only the capacity.
     ///
     /// # Examples
     ///
     /// ```
-    /// use bytes::{BytesMut, BufMut};
+    /// use utf8_bytes::Utf8BytesMut;
     ///
-    /// let mut bytes = BytesMut::with_capacity(64);
+    /// let mut bytes = Utf8BytesMut::with_capacity(64);
     ///
     /// // `bytes` contains no data, even though there is capacity
     /// assert_eq!(bytes.len(), 0);
     ///
-    /// bytes.put(&b"hello world"[..]);
+    /// bytes.extend_from_str("hello world");
     ///
-    /// assert_eq!(&bytes[..], b"hello world");
+    /// assert_eq!(bytes, "hello world");
     /// ```
     #[inline]
     pub fn with_capacity(capacity: usize) -> Utf8BytesMut {
@@ -111,68 +110,68 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::{BytesMut, BufMut};
+    /// use utf8_bytes::Utf8BytesMut;
     ///
-    /// let mut bytes = BytesMut::new();
+    /// let mut bytes = Utf8BytesMut::new();
     ///
     /// assert_eq!(0, bytes.len());
     ///
     /// bytes.reserve(2);
-    /// bytes.put_slice(b"xy");
+    /// bytes.extend_from_str("xy");
     ///
-    /// assert_eq!(&b"xy"[..], &bytes[..]);
+    /// assert_eq!("xy", bytes);
     /// ```
     #[inline]
     pub fn new() -> Utf8BytesMut {
         Utf8BytesMut::with_capacity(0)
     }
 
-    /// Returns the number of bytes contained in this `BytesMut`.
+    /// Returns the number of bytes contained in this [`Utf8BytesMut`].
     ///
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
-    /// let b = BytesMut::from(&b"hello"[..]);
+    /// let b = Utf8BytesMut::from("hello");
     /// assert_eq!(b.len(), 5);
     /// ```
     #[inline]
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.inner().len()
     }
 
-    /// Returns true if the `BytesMut` has a length of 0.
+    /// Returns true if the [`Utf8BytesMut`] has a length of 0.
     ///
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
-    /// let b = BytesMut::with_capacity(64);
+    /// let b = Utf8BytesMut::with_capacity(64);
     /// assert!(b.is_empty());
     /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.inner().is_empty()
     }
 
-    /// Returns the number of bytes the `BytesMut` can hold without reallocating.
+    /// Returns the number of bytes the [`Utf8BytesMut`] can hold without reallocating.
     ///
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let b = BytesMut::with_capacity(64);
     /// assert_eq!(b.capacity(), 64);
     /// ```
     #[inline]
     pub fn capacity(&self) -> usize {
-        self.inner.capacity()
+        self.inner().capacity()
     }
 
-    /// Converts `self` into an immutable `Bytes`.
+    /// Converts `self` into an immutable [`Utf8Bytes`].
     ///
     /// The conversion is zero cost and is used to indicate that the slice
     /// referenced by the handle will no longer be mutated. Once the conversion
@@ -181,27 +180,29 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::{BytesMut, BufMut};
+    /// use utf8_bytes::{Utf8BytesMut};
     /// use std::thread;
     ///
-    /// let mut b = BytesMut::with_capacity(64);
-    /// b.put(&b"hello world"[..]);
+    /// let mut b = Utf8BytesMut::with_capacity(64);
+    /// b.extend_from_str("hello world");
     /// let b1 = b.freeze();
     /// let b2 = b1.clone();
     ///
     /// let th = thread::spawn(move || {
-    ///     assert_eq!(&b1[..], b"hello world");
+    ///     assert_eq!(b1, "hello world");
     /// });
     ///
-    /// assert_eq!(&b2[..], b"hello world");
+    /// assert_eq!(b2, "hello world");
     /// th.join().unwrap();
     /// ```
     #[inline]
     pub fn freeze(self) -> Utf8Bytes {
-        unsafe { Utf8Bytes::from_bytes_unchecked(self.inner.freeze()) }
+        // SAFETY:
+        // - contents is still UTF-8
+        unsafe { Utf8Bytes::from_bytes_unchecked(self.into_inner().freeze()) }
     }
 
-    /// Creates a new `BytesMut` containing `len` zeros.
+    /// Creates a new [`Utf8BytesMut`] containing `len` zeros.
     ///
     /// The resulting object has a length of `len` and a capacity greater
     /// than or equal to `len`. The entire length of the object will be filled
@@ -213,15 +214,17 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
-    /// let zeros = BytesMut::zeroed(42);
+    /// let zeros = Utf8BytesMut::zeroed(42);
     ///
     /// assert!(zeros.capacity() >= 42);
     /// assert_eq!(zeros.len(), 42);
     /// zeros.into_iter().for_each(|x| assert_eq!(x, 0));
     /// ```
     pub fn zeroed(len: usize) -> Utf8BytesMut {
+        // SAFETY:
+        // - null is valid UTF-8
         unsafe { Self::from_bytes_mut_unchecked(bytes::BytesMut::zeroed(len)) }
     }
 
@@ -238,7 +241,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut a = BytesMut::from(&b"hello world"[..]);
     /// let mut b = a.split_off(5);
@@ -300,7 +303,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut a = BytesMut::from(&b"hello world"[..]);
     /// let mut b = a.split_to(5);
@@ -335,32 +338,17 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::from(&b"hello world"[..]);
     /// buf.truncate(5);
     /// assert_eq!(buf, b"hello"[..]);
     /// ```
     pub fn truncate(&mut self, len: usize) {
-        fn floor_char_boundary(s: &str, index: usize) -> usize {
-            if index >= s.len() {
-                s.len()
-            } else {
-                let lower_bound = index.saturating_sub(3);
-                let new_index = s.as_bytes()[lower_bound..=index]
-                    .iter()
-                    .rposition(|b| is_utf8_char_boundary(*b));
-
-                // SAFETY: we know that the character boundary will be within four bytes
-                unsafe { lower_bound + new_index.unwrap_unchecked() }
-            }
-        }
-
-        fn is_utf8_char_boundary(b: u8) -> bool {
-            // This is bit magic equivalent to: b < 128 || b >= 192
-            (b as i8) >= -0x40
-        }
-        self.inner.truncate(floor_char_boundary(self.as_str(), len));
+        if len < self.len() {
+            let _char_boundary = self.as_str().split_at(len);
+            self.inner.truncate(len)
+        };
     }
 
     /// Clears the buffer, removing all data. Existing capacity is preserved.
@@ -368,7 +356,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::from(&b"hello world"[..]);
     /// buf.clear();
@@ -387,7 +375,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::new();
     ///
@@ -433,7 +421,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut b = BytesMut::from(&b"hello world"[..]);
     ///
@@ -481,7 +469,7 @@ impl Utf8BytesMut {
     /// In the following example, a new buffer is allocated.
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::from(&b"hello"[..]);
     /// buf.reserve(64);
@@ -535,7 +523,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::with_capacity(64);
     /// assert_eq!(true, buf.try_reclaim(64));
@@ -576,7 +564,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::with_capacity(0);
     /// buf.extend_from_slice(b"aaabbb");
@@ -601,7 +589,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// let mut buf = BytesMut::with_capacity(64);
     /// buf.extend_from_slice(b"aaabbbcccddd");
@@ -628,7 +616,7 @@ impl Utf8BytesMut {
     /// # Examples
     ///
     /// ```
-    /// use bytes::BytesMut;
+    /// use utf8_bytes::Utf8BytesMut;
     ///
     /// // Allocate buffer big enough for 10 bytes.
     /// let mut buf = BytesMut::with_capacity(10);
@@ -649,6 +637,18 @@ impl Utf8BytesMut {
     #[inline]
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<u8>] {
         self.inner.spare_capacity_mut()
+    }
+}
+
+impl fmt::Debug for Utf8BytesMut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+impl fmt::Display for Utf8BytesMut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(f)
     }
 }
 
